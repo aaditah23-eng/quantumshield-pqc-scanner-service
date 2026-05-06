@@ -1,0 +1,45 @@
+# Optional fallback Dockerfile that builds OpenSSL 3.5.0 from source.
+# Use this only if the default Dockerfile reports opensslSupportsX25519MLKEM768=false.
+
+FROM debian:bookworm-slim AS openssl-builder
+
+ARG OPENSSL_VERSION=3.5.0
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    perl \
+    wget \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /tmp
+RUN wget https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz \
+    && tar -xzf openssl-${OPENSSL_VERSION}.tar.gz \
+    && cd openssl-${OPENSSL_VERSION} \
+    && ./Configure linux-x86_64 --prefix=/usr/local/openssl-3.5 --openssldir=/usr/local/openssl-3.5 shared \
+    && make -j"$(nproc)" \
+    && make install_sw
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    nodejs \
+    npm \
+    dnsutils \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=openssl-builder /usr/local/openssl-3.5 /usr/local/openssl-3.5
+ENV PATH="/usr/local/openssl-3.5/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/usr/local/openssl-3.5/lib64:/usr/local/openssl-3.5/lib:${LD_LIBRARY_PATH}"
+
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm install --omit=dev
+COPY . .
+
+ENV NODE_ENV=production
+ENV PORT=8080
+EXPOSE 8080
+CMD ["npm", "start"]
